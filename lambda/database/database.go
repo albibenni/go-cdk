@@ -8,7 +8,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"golang.org/x/tools/go/analysis/passes/ifaceassert"
 )
 
 const (
@@ -17,7 +16,8 @@ const (
 
 type UserStore interface {
 	DoesUserExist(username string) (bool, error)
-	InsertUser(user types.RegisterUser) error
+	InsertUser(user types.User) error
+	GetUser(username string) (types.User, error)
 }
 
 type DynamoDBClient struct {
@@ -25,16 +25,18 @@ type DynamoDBClient struct {
 }
 
 func NewDynamoDBClient() DynamoDBClient {
-	dbsession := session.Must(session.NewSession())
+	dbSession := session.Must(session.NewSession())
+	db := dynamodb.New(dbSession)
 
-	db := dynamodb.New(dbsession)
 	return DynamoDBClient{
 		databaseStore: db,
 	}
 }
 
+// Does this user exists?
+// How do I insert a new record into DynamoDB
+
 func (u DynamoDBClient) DoesUserExist(username string) (bool, error) {
-	//&dynamodb due to aws design - also reference is more efficient
 	result, err := u.databaseStore.GetItem(&dynamodb.GetItemInput{
 		TableName: aws.String(TABLE_NAME),
 		Key: map[string]*dynamodb.AttributeValue{
@@ -53,11 +55,10 @@ func (u DynamoDBClient) DoesUserExist(username string) (bool, error) {
 	}
 
 	return true, nil
-
 }
 
-func (u DynamoDBClient) InsertUser(user types.RegisterUser) error {
-	// assemble the Item
+func (u DynamoDBClient) InsertUser(user types.User) error {
+	// assemble the item
 	item := &dynamodb.PutItemInput{
 		TableName: aws.String(TABLE_NAME),
 		Item: map[string]*dynamodb.AttributeValue{
@@ -65,14 +66,16 @@ func (u DynamoDBClient) InsertUser(user types.RegisterUser) error {
 				S: aws.String(user.Username),
 			},
 			"password": {
-				S: aws.String(user.Password),
+				S: aws.String(user.PasswordHash),
 			},
 		},
 	}
+
 	_, err := u.databaseStore.PutItem(item)
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -87,9 +90,11 @@ func (u DynamoDBClient) GetUser(username string) (types.User, error) {
 			},
 		},
 	})
+
 	if err != nil {
 		return user, err
 	}
+
 	if result.Item == nil {
 		return user, fmt.Errorf("user not found")
 	}
@@ -98,5 +103,7 @@ func (u DynamoDBClient) GetUser(username string) (types.User, error) {
 	if err != nil {
 		return user, err
 	}
-    return user, nil
+
+	return user, nil
+
 }
